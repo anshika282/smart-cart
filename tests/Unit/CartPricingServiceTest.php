@@ -12,9 +12,7 @@ use Mockery;
 class CartPricingServiceTest extends TestCase
 {
     private CartPricingService $service;
-    private $mockCategoryDiscount; // To hold our mock object
-
-    // This method runs before each test method
+    private $mockCategoryDiscount; 
     protected function setUp(): void
     {
         parent::setUp();
@@ -22,8 +20,6 @@ class CartPricingServiceTest extends TestCase
         $this->mockCategoryDiscount = Mockery::mock(CategoryDiscount::class);
         $this->service = new CartPricingService($this->mockCategoryDiscount);
 
-        // Define expected category discounts for our tests.
-        // This simulates what the DB would return for these categories.
         $this->mockCategoryDiscounts(
             [
                 ['name' => 'Clothing', 'discount_percentage' => 10.00],
