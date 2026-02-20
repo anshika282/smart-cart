@@ -1,59 +1,177 @@
-<p align="center"><a href="https://laravel.com" target="_blank"><img src="https://raw.githubusercontent.com/laravel/art/master/logo-lockup/5%20SVG/2%20CMYK/1%20Full%20Color/laravel-logolockup-cmyk-red.svg" width="400" alt="Laravel Logo"></a></p>
+# Smart Cart Pricing Engine (Laravel PHP)
 
-<p align="center">
-<a href="https://github.com/laravel/framework/actions"><img src="https://github.com/laravel/framework/workflows/tests/badge.svg" alt="Build Status"></a>
-<a href="https://packagist.org/packages/laravel/framework"><img src="https://img.shields.io/packagist/dt/laravel/framework" alt="Total Downloads"></a>
-<a href="https://packagist.org/packages/laravel/framework"><img src="https://img.shields.io/packagist/v/laravel/framework" alt="Latest Stable Version"></a>
-<a href="https://packagist.org/packages/laravel/framework"><img src="https://img.shields.io/packagist/l/laravel/framework" alt="License"></a>
-</p>
+This project implements a simple cart pricing engine using Laravel. It calculates the final payable amount for a shopping cart by applying multiple rules, including category-specific discounts, quantity-based discounts, coupon codes, tax, and shipping, all fetched dynamically from a database. The frontend is a simple HTML/JavaScript page for demonstration and interaction.
 
-## About Laravel
+## Assumptions Made in the Code
 
-Laravel is a web application framework with expressive, elegant syntax. We believe development must be an enjoyable and creative experience to be truly fulfilling. Laravel takes the pain out of development by easing common tasks used in many web projects, such as:
+To maintain focus and adhere to the project scope, the following assumptions have been made:
 
-- [Simple, fast routing engine](https://laravel.com/docs/routing).
-- [Powerful dependency injection container](https://laravel.com/docs/container).
-- Multiple back-ends for [session](https://laravel.com/docs/session) and [cache](https://laravel.com/docs/cache) storage.
-- Expressive, intuitive [database ORM](https://laravel.com/docs/eloquent).
-- Database agnostic [schema migrations](https://laravel.com/docs/migrations).
-- [Robust background job processing](https://laravel.com/docs/queues).
-- [Real-time event broadcasting](https://laravel.com/docs/broadcasting).
+*   **Category Naming:** Category names (e.g., "Clothing", "Footwear") should be consistent. The `CartItemDTO` converts categories to lowercase upon mapping, and the service uses this lowercase form for database lookups.
+*   **Coupon Code Matching:** Coupon codes (`NEWUSER`, `FESTIVE`) are treated as case-insensitive during matching (`strtoupper` is used).
+*   **Active Rules:** Only `is_active = true` records for `category_discounts` are considered. Products fetched for the frontend are `is_active = true` and `stock_quantity > 0`.
+*   **Price/Quantity Validation:** Frontend inputs for price and quantity are validated by the controller to be non-negative (`min:0` for price) and positive (`min:1` for quantity) before reaching the service layer.
+*   **Decimal Precision:** All monetary calculations are handled with `DECIMAL(10,2)` in the database and `round($value, 2)` in PHP to ensure accurate financial results and prevent floating-point errors.
+*   **Shipping for Zero Subtotal:** If the cart's subtotal after all discounts is zero or negative, shipping is set to `0.00`.
 
-Laravel is accessible, powerful, and provides tools required for large, robust applications.
+## Discount & Calculation Order Criteria
 
-## Learning Laravel
+The business rules are applied in the following strict order to determine the final payable amount:
 
-Laravel has the most extensive and thorough [documentation](https://laravel.com/docs) and video tutorial library of all modern web application frameworks, making it a breeze to get started with the framework. You can also check out [Laravel Learn](https://laravel.com/learn), where you will be guided through building a modern Laravel application.
+1.  **Category Discount:**
+    *   Applied **per product item**.
+    *   Rates are fetched from the `category_discounts` table.
 
-If you don't feel like reading, [Laracasts](https://laracasts.com) can help. Laracasts contains thousands of video tutorials on a range of topics including Laravel, modern PHP, unit testing, and JavaScript. Boost your skills by digging into our comprehensive video library.
+2.  **Quantity Discount:**
+    *   Applied to the **subtotal after category discounts**.
+    *   If the total quantity of all items in the cart is $\ge$ 5, an additional 5% discount is applied.
 
-## Laravel Sponsors
+3.  **Coupon Discount:**
+    *   Applied to the **subtotal after category and quantity d
+    *   The coupon discount amount will never reduce the subtotal below zero.
 
-We would like to extend our thanks to the following sponsors for funding Laravel development. If you are interested in becoming a sponsor, please visit the [Laravel Partners program](https://partners.laravel.com).
+4.  **Tax Calculation (GST):**
+    *   Applied at **18%** (GST @ 18%).
+    *   Calculated on the **subtotal after all discounts (category, quantity, and coupon)**.
 
-### Premium Partners
+5.  **Shipping Charges:**
+    *   Based on the **subtotal after all discounts**.
+    *   If subtotal $\ge$ ₹3000: Free shipping (`₹0`).
+    *   If subtotal $< $₹3000: Shipping fee of `₹100`.
+    *   If subtotal $\le$ ₹0: Free shipping (`₹0`).
 
-- **[Vehikl](https://vehikl.com)**
-- **[Tighten Co.](https://tighten.co)**
-- **[Kirschbaum Development Group](https://kirschbaumdevelopment.com)**
-- **[64 Robots](https://64robots.com)**
-- **[Curotec](https://www.curotec.com/services/technologies/laravel)**
-- **[DevSquad](https://devsquad.com/hire-laravel-developers)**
-- **[Redberry](https://redberry.international/laravel-development)**
-- **[Active Logic](https://activelogic.com)**
+## API Endpoints
 
-## Contributing
+The following API endpoints are exposed by the Laravel backend:
 
-Thank you for considering contributing to the Laravel framework! The contribution guide can be found in the [Laravel documentation](https://laravel.com/docs/contributions).
+*   **`GET /api/products`**
+    *   **Description:** Fetches a list of all active and in-stock products, along with their category information. This is used by the frontend to populate the product selection dropdown.
+    *   **Response:** A JSON array of product objects, formatted using `ProductResource`.
+    *   **Example Response (truncated):**
+        ```json
+        [
+            {
+                "product_id": 8,
+                "name": "accusamus aut",
+                "price": 4777.40,
+                "category": "Clothing",
+                "sku": "IOU-1270",
+                "stock_quantity": 733,
+                "is_active": true
+            }
+            // ... more products
+        ]
+        ```
 
-## Code of Conduct
+*   **`POST /api/cart/calculate`**
+    *   **Description:** Receives the current cart contents (products and quantities) and an optional coupon code. It then applies all business rules to calculate the final pricing details.
+    *   **Request Body (JSON):**
+        ```json
+        {
+            "cart": [
+                {
+                    "product_id": 101,
+                    "name": "T-Shirt",
+                    "price": 500,
+                    "category": "clothing",
+                    "qty": 2
+                },
+                {
+                    "product_id": 205,
+                    "name": "Shoes",
+                    "price": 2000,
+                    "category": "footwear",
+                    "qty": 1
+                }
+            ],
+            "coupon_code": "NEWUSER"
+        }
+        ```
+    *   **Response (JSON):** The structured output of the calculation.
+        ```json
+        {
+            "subtotal": 3000.00,
+            "discounts": {
+                "category_discount": 350.00,
+                "quantity_discount": 150.00,
+                "coupon_discount": 200.00
+            },
+            "tax": 414.00,
+            "shipping": 0.00,
+            "final_amount": 3064.00
+        }
+        ```
 
-In order to ensure that the Laravel community is welcoming to all, please review and abide by the [Code of Conduct](https://laravel.com/docs/contributions#code-of-conduct).
+## Project Structure
 
-## Security Vulnerabilities
+The project follows a standard Laravel directory structure, with key additions for the pricing engine highlighted:
 
-If you discover a security vulnerability within Laravel, please send an e-mail to Taylor Otwell via [taylor@laravel.com](mailto:taylor@laravel.com). All security vulnerabilities will be promptly addressed.
+```
+.
+├── app/
+│   ├── DTOs/
+│   │   ├── CartDTO.php             # DTO for the entire cart payload
+│   │   └── CartItemDTO.php         # DTO for individual items in the cart
+│   ├── Http/
+│   │   ├── Controllers/
+│   │   │   ├── ProductController.php  # Handles GET /api/products
+│   │   │   └── CartController.php         # Handles POST /api/cart/calculate
+│   │   └── Resources/
+│   │       └── ProductResource.php        # Transforms Product Model to API-friendly format
+│   ├── Models/
+│   │   ├── Category.php            # Eloquent model for 'categories' table
+│   │   ├── CategoryDiscount.php    # Eloquent model for 'category_discounts' table
+│   │   ├── Coupon.php              # Eloquent model for 'coupons' table
+│   │   ├── Order.php               # Eloquent model for 'orders' table
+│   │   ├── OrderItem.php           # Eloquent model for 'order_items' table
+│   │   └── Product.php             # Eloquent model for 'products' table
+│   └── Services/
+│       └── CartPricingService.php  # The core business logic for cart calculations
+├── database/
+│   ├── factories/                  # Factories for seeding test data
+│   │   ├── CategoryDiscountFactory.php
+│   │   ├── CategoryFactory.php
+│   │   ├── CouponFactory.php
+│   │   └── ProductFactory.php
+│   ├── migrations/                 # Database schema definitions
+│   │   ├── 2024_01_01_000001_create_categories_table.php
+│   │   ├── 2024_01_01_000002_create_products_table.php
+│   │   ├── 2024_01_01_000003_create_coupons_table.php
+│   │   └── 2024_01_01_000004_create_orders_table.php
+│   └── seeders/                    # Seeders to populate the database with dummy data
+│       ├── CategorySeeder.php
+│       ├── CouponSeeder.php
+│       ├── DatabaseSeeder.php      # Main seeder that calls others
+│       └── ProductSeeder.php
+├── resources/
+│   └── views/
+│       └── welcome.blade.php       # Contains the interactive frontend HTML/JavaScript
+├── routes/
+│   └── api.php                     # API route definitions
+├── tests/
+│   └── Unit/
+│       └── CartPricingServiceTest.php # Unit tests for the CartPricingService
+```
 
-## License
+## Setup and Execution Instructions
 
-The Laravel framework is open-sourced software licensed under the [MIT license](https://opensource.org/licenses/MIT).
+1.  **After clonong and initial setup migrate and seed the databse:**
+    ```bash
+    php artisan migrate
+    php artisan db:seed
+    ```
+    This will typically start the server on `http://localhost:8000`.
+
+2.  **Start the Laravel Development Server:**
+    ```bash
+    php artisan serve
+    ```
+    This will typically start the server on `http://localhost:8000`.
+
+3.  **Access the Frontend:**
+    Open your web browser and navigate to:
+    ```
+    http://localhost:8000/
+    ```
+---
+
+This README provides a comprehensive overview for anyone looking to understand, set up, and test your Smart Cart Pricing Engine.
