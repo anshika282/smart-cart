@@ -4,6 +4,7 @@ namespace App\Services;
 
 use App\DTOs\CartDTO;
 use App\DTOs\CartItemDTO;
+use App\Models\CategoryDiscount; 
 
 class CartPricingService
 {
@@ -21,6 +22,18 @@ class CartPricingService
     ];
 
     /**
+     * @var array Cache for category discount percentages to avoid repeated DB queries within a single calculation.
+     */
+    private array $cachedCategoryDiscounts = [];
+
+     /**
+     * Inject the CategoryDiscount model (or a repository) to fetch dynamic discount rules.
+     */
+    public function __construct(
+        private CategoryDiscount $categoryDiscountModel // Using the model directly for simplicity in this example
+    ) {}
+
+    /**
      * Main engine method to calculate the final pricing for a given cart.
      *
      * @param CartDTO $cartDTO The Data Transfer Object representing the cart and coupon.
@@ -28,6 +41,8 @@ class CartPricingService
      */
     public function calculateFinalPricing(CartDTO $cartDTO): array
     {
+        // Reset cache for each calculation to ensure fresh data if the service instance is reused
+        $this->cachedCategoryDiscounts = [];
         // 1. Merge duplicate product items and filter out invalid data.
         $cleanItems = $this->aggregateDuplicateItems($cartDTO->items);
 
@@ -71,7 +86,13 @@ class CartPricingService
         $tax = round($currentSubtotal * self::TAX_RATE, 2);
 
         // 6. Shipping Charges (based on the fully discounted subtotal)
-        $shipping = $currentSubtotal >= self::SHIPPING_THRESHOLD ? 0.00 : self::SHIPPING_FEE;
+        if ($currentSubtotal <= 0) {
+                $shipping = 0.00;
+            } elseif ($currentSubtotal >= self::SHIPPING_THRESHOLD) {
+                $shipping = 0.00;
+            } else {
+                $shipping = self::SHIPPING_FEE;
+            }
 
         // 7. Final Payable Amount
         $finalAmount = round($currentSubtotal + $tax + $shipping, 2);
@@ -141,9 +162,22 @@ class CartPricingService
     private function calculateCategoryDiscount(array $items): float
     {
         $discount = 0;
+        if (empty($this->cachedCategoryDiscounts)) {
+            $discounts = $this->categoryDiscountModel->newQuery()
+                                                    ->join('categories', 'category_discounts.category_id', '=', 'categories.id')
+                                                    ->whereIn('categories.name', $categoryNames)
+                                                    ->where('category_discounts.is_active', true)
+                                                    ->get(['categories.name', 'category_discounts.discount_percentage']);
+
+            foreach ($discounts as $disc) {
+                // Store in cache using category name (lowercase) as key
+                $this->cachedCategoryDiscounts[strtolower($disc->name)] = $disc->discount_percentage / 100;
+            }
+        }
+
         foreach ($items as $item) {
-            // Retrieve discount rate for the item's category.
-            $rate = self::CATEGORY_DISCOUNTS[$item->category] ?? 0.00;
+            // Retrieve discount rate from cache. Default to 0 if category not found or no active discount.
+            $rate = $this->cachedCategoryDiscounts[$item->category] ?? 0.00;
             $discount += ($item->price * $item->qty) * $rate;
         }
         return round($discount, 2);
