@@ -7,7 +7,7 @@ This project implements a simple cart pricing engine using Laravel. It calculate
 To maintain focus and adhere to the project scope, the following assumptions have been made:
 
 *   **Category Naming:** Category names (e.g., "Clothing", "Footwear") should be consistent. The `CartItemDTO` converts categories to lowercase upon mapping, and the service uses this lowercase form for database lookups.
-*   **Coupon Code Matching:** Coupon codes (`NEWUSER`, `FESTIVE`) are treated as case-insensitive during matching (`strtoupper` is used).
+*   **Coupon Code Matching:** Coupon codes (`NEWUSER`, `FESTIVE`) are treated as case-insensitive during matching (`strtoupper` is used).Also if no coupon are added then the coupon discount is zero. The coupon feild is not kept as required in fe.
 *   **Active Rules:** Only `is_active = true` records for `category_discounts` are considered. Products fetched for the frontend are `is_active = true` and `stock_quantity > 0`.
 *   **Price/Quantity Validation:** Frontend inputs for price and quantity are validated by the controller to be non-negative (`min:0` for price) and positive (`min:1` for quantity) before reaching the service layer.
 *   **Decimal Precision:** All monetary calculations are handled with `DECIMAL(10,2)` in the database and `round($value, 2)` in PHP to ensure accurate financial results and prevent floating-point errors.
